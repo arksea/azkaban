@@ -8,3 +8,4 @@ build/
 .classpath
 .project
 *.swp
+/.nb-gradle/
