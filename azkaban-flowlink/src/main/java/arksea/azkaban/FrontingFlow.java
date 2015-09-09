@@ -40,4 +40,9 @@ public class FrontingFlow{
         return this.projectName.equals(other.projectName) && this.flowId.equals(other.flowId);
     }
     
+    @Override
+    public String toString() {
+        return projectName+":"+flowId;
+    }
+    
 }

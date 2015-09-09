@@ -38,4 +38,9 @@ public class FollowingFlow {
         final FollowingFlow other = (FollowingFlow) obj;
         return this.project.getName().equals(other.project.getName()) && this.flow.getId().equals(other.flow.getId());
     }
+    
+    @Override
+    public String toString() {
+        return project.getName()+":"+flow.getId();
+    }
 }

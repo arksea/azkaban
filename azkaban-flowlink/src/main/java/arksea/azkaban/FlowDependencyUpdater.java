@@ -24,7 +24,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.apache.commons.lang.time.DateUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +68,7 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
 
     @Override
     protected void init() throws Throwable {
+        logger.info("use the conf path start server: "+state.azkabanConfPath);
         Props azkabanSettings = AzkabanServer.loadProps(new String[]{"-conf", state.azkabanConfPath});
         String hostname = azkabanSettings.getString("jetty.hostname", "localhost");
         int port;
@@ -102,7 +102,7 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
 
     @Override
     protected void terminate(Throwable ex) {
-        logger.debug("FlowDependencyUpdate Actor terminated");
+        logger.info("FlowDependencyUpdate Actor terminated");
     }
 
     @Override
@@ -131,6 +131,11 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
         FollowingFlow followingFlow = state.followingFlows.get(ffkey);
         boolean updateFrontingCondition = false;
         if (followingFlow == null || !followingFlow.frontingFlowsCfg.equals(frontingStr)) {
+            if (followingFlow == null) {
+                logger.info(ffkey+" added fronting-flows=" + frontingStr);
+            } else {
+                logger.info(ffkey+" modified fronting-flows="+followingFlow.frontingFlowsCfg+"->" + frontingStr);
+            }
             Map<FrontingFlow, Condition> frontingCondition = new HashMap<>();
             followingFlow = new FollowingFlow(frontingStr, prj, flow, frontingCondition);
             state.followingFlows.put(ffkey, followingFlow);
@@ -143,15 +148,18 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
                 logger.warn("" + prj.getId() + ":" + flow.getId() + "的fronting-flows配置错误: " + frontingStr);
                 continue;
             }
-            String key = args[0] + ":" + args[1];
+            String prjStr = args[0].trim();
+            String flowStr = args[1].trim();
+            String key = prjStr + ":" + flowStr;
             FrontingFlow frontingFlow = state.frontingFlows.get(key);
             if (frontingFlow == null) {
-                frontingFlow = new FrontingFlow(args[0], args[1]);
+                frontingFlow = new FrontingFlow(prjStr, flowStr);
                 state.frontingFlows.put(key, frontingFlow);
             }
             if (updateFrontingCondition) {
                 Condition condition = new Condition(args.length == 3 ? args[2] : "");
                 followingFlow.frontingCondition.put(frontingFlow, condition);
+                logger.debug(ffkey+"'s fronting-flow added: "+key);
             }
             frontingFlow.followingFlows.add(followingFlow);
         }
@@ -194,26 +202,34 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
         for (ExecutableFlow s : succeeded) {
             String key = s.getProjectName() + ":" + s.getFlowId();
             FrontingFlow fronting = state.frontingFlows.get(key);
+            //把fronting!=null的判断放在SUCCEEDED的外层是为了先跳过那些没有配置fronting-flow的flow
             if (fronting != null) {
                 if (s.getStatus() == Status.SUCCEEDED) {
                     if (!skipUnsucceeded) {
                         state.lastExecId = s.getExecutionId();
                     }
-                    if (s.getStartTime() != fronting.lastStartTime || s.getEndTime() != fronting.lastSucceededTime) {
+                    if (s.getStartTime() > fronting.lastStartTime && s.getEndTime() > fronting.lastSucceededTime) {
                         fronting.lastStartTime = s.getStartTime();
                         fronting.lastSucceededTime = s.getEndTime();
                         ExecutionOptions opt = s.getExecutionOptions();
                         if (opt != null && opt.getFlowParameters().containsKey("skip-following-flow")) {
-                            logger.info(key + " skip following flow");
+                            logger.info(key + " skip following flow because it's executed by arg skip-following-flow");
                         } else {
+                            logger.debug(key +" is succeed");
                             frontingSucceed(fronting);
                         }
+                    } else {
+                        logger.debug("skip checked succeed flow: "+key);
                     }
                 } else { //当检测列表中还有未完成的任务时，将跳过state.lastExecId的赋值，下次从这个未完成的任务开始重新扫描
+                    logger.debug("skip executing flow of not succeed: "+key);
                     skipUnsucceeded = true;
                 }
-            } else if (!skipUnsucceeded) {
-                state.lastExecId = s.getExecutionId();
+            } else {
+                logger.debug("skip executing flow of not configed dependencies: "+key);
+                if (!skipUnsucceeded) {
+                    state.lastExecId = s.getExecutionId();
+                }
             }
         }
     }
@@ -231,38 +247,42 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
             for (Map.Entry<FrontingFlow, Condition> e : following.frontingCondition.entrySet()) {
                 FrontingFlow fronting = e.getKey();
                 Condition condition = e.getValue();
-                String expression = condition.expression.toLowerCase().trim();
+                String expression = condition.expression.trim();
                 Calendar startTime = Calendar.getInstance();
                 startTime.setTimeInMillis(fronting.lastStartTime);
                 //有frontingFlow的条件不成立或者trigger已经被触发过的则认为不满足执行FollowingFlow的条件
                 if (condition.getTriggered()) {
+                    logger.debug(following.toString()+" -> "+fronting.toString()+":triggered;");
                     pass = false;
                     break;
                 }
                 switch (expression) {
-                    case "":
-                        //默认为12小时内
-                        if (now - fronting.lastStartTime > 12 * 3600 * 1000) {
-                            pass = false;
-                            break OUTER;
-                        }
-                        break;
                     case "sameday()":
                         if (!DateUtils.isSameDay(cnow, startTime)) {
+                            logger.debug(following.toString()+" -> "+fronting.toString()+":sameday()=timeout; ");
                             pass = false;
                             break OUTER;
                         }
+                        logger.debug(following.toString()+" -> "+fronting.toString()+":sameday()=pass;");
                         break;
                     case "samehour()":
                         if (!DateUtils.isSameDay(cnow, startTime)
                                 || cnow.get(Calendar.HOUR_OF_DAY) != startTime.get(Calendar.HOUR_OF_DAY)) {
+                            logger.debug(following.toString()+" -> "+fronting.toString()+":samehour()=timeout;");
                             pass = false;
                             break OUTER;
                         }
+                        logger.debug(following.toString()+" -> "+fronting.toString()+":samehour()=pass;");
                         break;
                     default:
-                        pass = false;
-                        break OUTER;
+                        //默认为12小时内
+                        if (now - fronting.lastStartTime > 12 * 3600 * 1000) {
+                            logger.debug(following.toString()+" -> "+fronting.toString()+":withinHours(12)=timeout;");
+                            pass = false;
+                            break OUTER;
+                        }
+                        logger.debug(following.toString()+" -> "+fronting.toString()+":withinHours(12)=pass;");
+                        break;
                 }
             }
             if (pass) {
@@ -288,9 +308,9 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
 
         try {
             execManager.submitExecutableFlow(exflow, followingFlow.project.getLastModifiedUser());
-            logger.info("Invoked flow " + followingFlow.project.getName() + ":" + followingFlow.flow.getId());
+            logger.info("Invoked flow " + followingFlow.toString());
         } catch (ExecutorManagerException ex) {
-            logger.error("Invoked flow failed " + followingFlow.project.getName() + ":" + followingFlow.flow.getId(), ex);
+            logger.error("Invoked flow failed " + followingFlow.toString(), ex);
             throw new RuntimeException(ex);
         }
     }
