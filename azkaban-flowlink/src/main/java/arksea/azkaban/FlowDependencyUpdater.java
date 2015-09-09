@@ -180,7 +180,6 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
                     Props props = projectLoader.fetchProjectProperty(prj.getId(), prj.getVersion(), source);
                     if (props.containsKey("fronting-flows")) {
                         String str = props.getString("fronting-flows");
-                        logger.debug(prj.getName() + ":" + flow.getId() + " fronting-flows -> " + str);
                         parseFrontingString(str, prj, flow);
                         break; //以搜索到的第一个fronting-flows为准
                     }

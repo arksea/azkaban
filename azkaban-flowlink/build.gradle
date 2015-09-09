@@ -19,6 +19,7 @@ repositories {
 }
 
 dependencies {
+    compile(project(':azkaban-webserver'))
     compile(project(':azkaban-common'))
     compile("net.arksea:jactor:1.0.0")
     compile('mysql:mysql-connector-java:5.1.32')
