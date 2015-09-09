@@ -113,7 +113,6 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
     @Override
     protected void handle_info(Message msg, String from) throws Throwable {
         String key = msg.name;
-        logger.debug(key);
         switch (key) {
             case "on_update_depend":
                 updateDependency();
@@ -221,7 +220,6 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
                         logger.debug("skip checked succeed flow: "+key);
                     }
                 } else { //当检测列表中还有未完成的任务时，将跳过state.lastExecId的赋值，下次从这个未完成的任务开始重新扫描
-                    logger.debug("skip executing flow of not succeed: "+key);
                     skipUnsucceeded = true;
                 }
             } else {
