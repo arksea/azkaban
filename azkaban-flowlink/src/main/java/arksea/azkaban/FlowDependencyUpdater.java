@@ -214,7 +214,7 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
                             logger.info(key + " skip following flow because it's executed by arg skip-following-flow");
                         } else {
                             logger.debug(key +" is succeed");
-                            frontingSucceed(fronting);
+                            frontingSucceed(fronting, opt);
                         }
                     } else {
                         logger.debug("skip checked succeed flow: "+key);
@@ -223,18 +223,18 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
                     skipUnsucceeded = true;
                 }
             } else {
-                logger.debug("skip executing flow of not configed dependencies: "+key);
                 if (!skipUnsucceeded) {
+                    logger.debug("skip executing flow of not configed dependencies: "+key);
                     state.lastExecId = s.getExecutionId();
                 }
             }
         }
     }
 
-    private void frontingSucceed(FrontingFlow succeed) {
+    private void frontingSucceed(FrontingFlow succeed,ExecutionOptions frontingOpt) {
         //当FrontingFlow执行完成时将其所有FollowingFlow中的本FrongtingFlow的triggered设置为false
         for (FollowingFlow following : succeed.followingFlows) {
-            following.frontingCondition.get(succeed).oneFrontingFlowSucceed();
+            following.frontingCondition.get(succeed).oneFrontingFlowSucceed(frontingOpt);
         }
         for (FollowingFlow following : succeed.followingFlows) {
             boolean pass = true;
@@ -289,18 +289,19 @@ public class FlowDependencyUpdater extends Actor<FlowDependencyUpdater.State> {
     }
 
     void requestExecuteFlow(FollowingFlow followingFlow) {
-        //当FollowingFlow执行条件全部满足时将其所有FrontingFlow的triggered设置为true
-        for (Condition c : followingFlow.frontingCondition.values()) {
-            c.followingFlowReady();
-        }
         ExecutableFlow exflow = new ExecutableFlow(followingFlow.project, followingFlow.flow);
         exflow.setSubmitUser(followingFlow.project.getLastModifiedUser());
         exflow.addAllProxyUsers(followingFlow.project.getProxyUsers());
 
         ExecutionOptions executionOptions = new ExecutionOptions();
+        //当FollowingFlow执行条件全部满足时将其所有FrontingFlow的triggered设置为true
+        //并将继承的运行参数设置到FollowingFlow中
+        for (Condition c : followingFlow.frontingCondition.values()) {
+            c.followingFlowReady();
+            executionOptions.addAllFlowParameters(c.getIneritedOpt().getFlowParameters());            
+        }
         executionOptions.setFailureEmails(followingFlow.flow.getFailureEmails());
         executionOptions.setSuccessEmails(followingFlow.flow.getSuccessEmails());
-
         exflow.setExecutionOptions(executionOptions);
 
         try {
